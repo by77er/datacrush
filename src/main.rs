@@ -1,4 +1,3 @@
-use anyhow::Error;
 use axum::{
     extract::{Json, Path, State},
     http::{HeaderMap, HeaderValue, StatusCode},
@@ -14,7 +13,7 @@ use sqlx::{
 };
 use std::{
     io,
-    path::{Path as StdPath, PathBuf}, str::FromStr,
+    path::{Path as StdPath, PathBuf},
 };
 
 mod file;
@@ -127,7 +126,7 @@ async fn put_file(
                 .into_response(),
             Err(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create file metadata"),
+                "Failed to create file metadata",
             )
                 .into_response(),
         }
@@ -140,12 +139,12 @@ async fn delete_file(State(mut state): State<AppState>, Path(file): Path<PathBuf
     if !valid_path(&file) {
         return (StatusCode::BAD_REQUEST, "Invalid path").into_response();
     }
-    if let Ok(_) = state.filestore.delete_file(&file).await {
+    if state.filestore.delete_file(&file).await.is_ok() {
         match file::delete_file_data(&state.pool, &file).await {
             Ok(_) => (StatusCode::OK, "OK").into_response(),
             Err(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to delete file metadata"),
+                "Failed to delete file metadata",
             )
                 .into_response(),
         }
@@ -199,10 +198,10 @@ async fn put_redirect(
 
 // stop directory traversal
 fn valid_path(path: &StdPath) -> bool {
-    path.is_relative() && !path.components().all(|c| match c {
-        std::path::Component::Normal(_) => true,
-        _ => false,
-    })
+    path.is_relative()
+        && !path
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
 async fn not_found() -> impl IntoResponse {

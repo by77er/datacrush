@@ -38,11 +38,12 @@ pub async fn put_paste(pool: &PgPool, data: &str) -> Result<String, Error> {
             .map(char::from)
             .collect::<String>();
 
-        if let Ok(_) = sqlx::query("INSERT INTO pastes (slug, data) VALUES ($1, $2)")
+        if sqlx::query("INSERT INTO pastes (slug, data) VALUES ($1, $2)")
             .bind(&slug)
             .bind(data)
             .execute(pool)
             .await
+            .is_ok()
         {
             return Ok(slug);
         }

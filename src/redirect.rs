@@ -38,11 +38,12 @@ pub async fn put_url(pool: &PgPool, url: &str) -> Result<String, Error> {
             .map(char::from)
             .collect::<String>();
 
-        if let Ok(_) = sqlx::query("INSERT INTO urls (slug, url) VALUES ($1, $2)")
+        if sqlx::query("INSERT INTO urls (slug, url) VALUES ($1, $2)")
             .bind(&slug)
             .bind(url)
             .execute(pool)
             .await
+            .is_ok()
         {
             return Ok(slug);
         }
