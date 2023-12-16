@@ -16,11 +16,17 @@ pub struct Response {
 
 // Logic
 pub async fn get_paste(pool: &PgPool, slug: &str) -> Result<String, Error> {
+
+    let tx = pool.begin().await?;
     let (result,): (String,) = sqlx::query_as("SELECT data FROM pastes WHERE slug = $1")
         .bind(slug)
         .fetch_one(pool)
         .await?;
-
+    sqlx::query("UPDATE pastes SET views = views + 1 WHERE slug = $1")
+        .bind(slug)
+        .execute(pool).await?;
+    tx.commit().await?;
+    
     Ok(result)
 }
 

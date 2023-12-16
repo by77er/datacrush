@@ -16,10 +16,15 @@ pub struct Response {
 
 // Logic
 pub async fn get_url(pool: &PgPool, slug: &str) -> Result<String, Error> {
+    let tx = pool.begin().await?;
     let (result,): (String,) = sqlx::query_as("SELECT url FROM urls WHERE slug = $1")
         .bind(slug)
         .fetch_one(pool)
         .await?;
+    sqlx::query("UPDATE urls SET uses = uses + 1 WHERE slug = $1")
+        .bind(slug)
+        .execute(pool).await?;
+    tx.commit().await?;
 
     Ok(result)
 }
