@@ -1,7 +1,7 @@
-use sqlx::PgPool;
 use anyhow::Error;
 use rand::{distributions::Alphanumeric, Rng};
-use serde::{ Serialize, Deserialize };
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 
 // Models
 #[derive(Deserialize)]
@@ -16,7 +16,6 @@ pub struct Response {
 
 // Logic
 pub async fn get_paste(pool: &PgPool, slug: &str) -> Result<String, Error> {
-
     let tx = pool.begin().await?;
     let (result,): (String,) = sqlx::query_as("SELECT data FROM pastes WHERE slug = $1")
         .bind(slug)
@@ -24,9 +23,10 @@ pub async fn get_paste(pool: &PgPool, slug: &str) -> Result<String, Error> {
         .await?;
     sqlx::query("UPDATE pastes SET views = views + 1 WHERE slug = $1")
         .bind(slug)
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     tx.commit().await?;
-    
+
     Ok(result)
 }
 
@@ -39,12 +39,13 @@ pub async fn put_paste(pool: &PgPool, data: &str) -> Result<String, Error> {
             .collect::<String>();
 
         if let Ok(_) = sqlx::query("INSERT INTO pastes (slug, data) VALUES ($1, $2)")
-                .bind(&slug)
-                .bind(data)
-                .execute(pool)
-                .await {
-                    return Ok(slug);
-                }
+            .bind(&slug)
+            .bind(data)
+            .execute(pool)
+            .await
+        {
+            return Ok(slug);
+        }
     }
 
     Err(anyhow::anyhow!("Failed to generate slug"))

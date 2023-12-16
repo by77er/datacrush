@@ -1,7 +1,7 @@
-use sqlx::PgPool;
 use anyhow::Error;
 use rand::{distributions::Alphanumeric, Rng};
-use serde::{ Serialize, Deserialize };
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
 
 // Models
 #[derive(Deserialize)]
@@ -23,7 +23,8 @@ pub async fn get_url(pool: &PgPool, slug: &str) -> Result<String, Error> {
         .await?;
     sqlx::query("UPDATE urls SET uses = uses + 1 WHERE slug = $1")
         .bind(slug)
-        .execute(pool).await?;
+        .execute(pool)
+        .await?;
     tx.commit().await?;
 
     Ok(result)
@@ -38,12 +39,13 @@ pub async fn put_url(pool: &PgPool, url: &str) -> Result<String, Error> {
             .collect::<String>();
 
         if let Ok(_) = sqlx::query("INSERT INTO urls (slug, url) VALUES ($1, $2)")
-                .bind(&slug)
-                .bind(url)
-                .execute(pool)
-                .await {
-                    return Ok(slug);
-                }
+            .bind(&slug)
+            .bind(url)
+            .execute(pool)
+            .await
+        {
+            return Ok(slug);
+        }
     }
 
     Err(anyhow::anyhow!("Failed to generate slug"))

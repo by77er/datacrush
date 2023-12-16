@@ -22,12 +22,13 @@ impl FileStore {
         Path::new(&self.base_path).join(path)
     }
 
-    pub async fn create_file(&mut self, path: &str, stream: impl Stream<Item = Result<Bytes, Error>>) -> Result<usize, Error> {
+    pub async fn create_file<T: Into<std::io::Error>>(&mut self, path: &str, stream: impl Stream<Item = Result<Bytes, T>>) -> Result<usize, Error> {
         let path = self.get_path(path);
         if let Some(dir) = Path::new(&path).parent() {
             create_dir_all(dir).await?;
         }
         let mut file = OpenOptions::new()
+            .create_new(true)
             .create(true)
             .write(true)
             .open(path)
