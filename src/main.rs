@@ -9,6 +9,7 @@ use sqlx::{
     postgres::{PgPoolOptions, Postgres},
     Pool,
 };
+use filestore::FileStore;
 
 mod file;
 mod paste;
@@ -17,6 +18,7 @@ mod redirect;
 #[derive(Clone)]
 struct AppState {
     pub pool: Pool<Postgres>,
+    pub filestore: FileStore,
 }
 
 #[tokio::main]
@@ -27,6 +29,7 @@ async fn main() {
             .connect("postgres://postgres:postgres@localhost/datacrush")
             .await
             .unwrap(),
+        filestore: FileStore::new("objects".to_string()),
     };
 
     sqlx::migrate!("./migrations")
@@ -36,14 +39,14 @@ async fn main() {
     let unauthenticated = Router::new()
         .route("/", get(handle))
         .route("/", post(handle))
-        .route("/f/:file", get(get_file))
+        .route("/f/*file", get(get_file))
         .route("/p/:slug", get(get_paste))
         .route("/r/:slug", get(get_redirect));
 
     let authenticated = Router::new()
-        .route("/upload", post(handle))
-        .route("/paste", post(put_paste))
-        .route("/redirect", post(put_redirect));
+        .route("/f", post(handle))
+        .route("/p", post(put_paste))
+        .route("/r", post(put_redirect));
 
     let app = Router::new()
         .nest("/", unauthenticated)
@@ -59,7 +62,7 @@ async fn handle() -> &'static str {
     "Hello, World!"
 }
 
-async fn get_file(State(state): State<AppState>, Path(file): Path<String>) -> String {
+async fn get_file(State(_state): State<AppState>, Path(file): Path<String>) -> String {
     // let (result,): (String,) = sqlx::query_as("SELECT $1")
     //     .bind(file)
     //     .fetch_one(&state.pool)
@@ -69,7 +72,8 @@ async fn get_file(State(state): State<AppState>, Path(file): Path<String>) -> St
     // format!("Got file \"{}\".", result)
 
     // redirect::put_url(&state.pool, "https://google.com").await.unwrap();
-    "Hello, World!".to_string()
+    // axum::body::Body::from_stream(/* something */);
+    format!("You requested \"{}\".", file)
 }
 
 async fn get_paste(State(state): State<AppState>, Path(slug): Path<String>) -> Response {
