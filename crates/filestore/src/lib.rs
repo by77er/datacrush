@@ -19,7 +19,6 @@ impl FileStore {
     }
 
     fn get_path(&self, path: &Path) -> Result<PathBuf, Error> {
-        println!("path: {:?}", path);
         Ok(Path::new(&self.base_path).join(path))
     }
 
