@@ -190,7 +190,7 @@ async fn put_redirect(
     }
 }
 
-// stop directory traversal attacks
+// stop directory traversal
 fn strip_parent(path: &StdPath) -> PathBuf {
     path.components()
         .filter(|c| c != &std::path::Component::ParentDir)
@@ -199,4 +199,17 @@ fn strip_parent(path: &StdPath) -> PathBuf {
 
 async fn not_found() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "Not Found")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_parent() {
+        assert_eq!(
+            strip_parent(&std::path::Path::new("foo/bar/../baz")),
+            std::path::Path::new("foo/bar/baz")
+        );
+    }
 }
