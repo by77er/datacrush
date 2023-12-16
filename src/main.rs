@@ -1,3 +1,4 @@
+use anyhow::Error;
 use axum::{
     extract::{Json, Path, State},
     http::{HeaderMap, HeaderValue, StatusCode},
@@ -13,7 +14,7 @@ use sqlx::{
 };
 use std::{
     io,
-    path::{Path as StdPath, PathBuf},
+    path::{Path as StdPath, PathBuf}, str::FromStr,
 };
 
 mod file;
@@ -70,7 +71,9 @@ async fn handle() -> &'static str {
 }
 
 async fn get_file(State(state): State<AppState>, Path(file): Path<PathBuf>) -> Response {
-    let file = strip_parent(&file);
+    if !valid_path(&file) {
+        return (StatusCode::BAD_REQUEST, "Invalid path").into_response();
+    }
     if let Ok(file_data) = file::get_file_data(&state.pool, &file).await {
         if let Ok(stream) = state.filestore.get_file(&file).await {
             let mut res = axum::body::Body::from_stream(stream).into_response();
@@ -99,7 +102,9 @@ async fn put_file(
     Path(file): Path<PathBuf>,
     body: axum::body::Body,
 ) -> Response {
-    let file = strip_parent(&file);
+    if !valid_path(&file) {
+        return (StatusCode::BAD_REQUEST, "Invalid path").into_response();
+    }
     let stream = body.into_data_stream();
     if let Ok(size) = state
         .filestore
@@ -132,7 +137,9 @@ async fn put_file(
 }
 
 async fn delete_file(State(mut state): State<AppState>, Path(file): Path<PathBuf>) -> Response {
-    let file = strip_parent(&file);
+    if !valid_path(&file) {
+        return (StatusCode::BAD_REQUEST, "Invalid path").into_response();
+    }
     if let Ok(_) = state.filestore.delete_file(&file).await {
         match file::delete_file_data(&state.pool, &file).await {
             Ok(_) => (StatusCode::OK, "OK").into_response(),
@@ -191,25 +198,13 @@ async fn put_redirect(
 }
 
 // stop directory traversal
-fn strip_parent(path: &StdPath) -> PathBuf {
-    path.components()
-        .filter(|c| c != &std::path::Component::ParentDir)
-        .collect()
+fn valid_path(path: &StdPath) -> bool {
+    path.is_relative() && !path.components().all(|c| match c {
+        std::path::Component::Normal(_) => true,
+        _ => false,
+    })
 }
 
 async fn not_found() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, "Not Found")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_strip_parent() {
-        assert_eq!(
-            strip_parent(&std::path::Path::new("foo/bar/../baz")),
-            std::path::Path::new("foo/bar/baz")
-        );
-    }
 }
