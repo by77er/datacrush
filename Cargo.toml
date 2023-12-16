@@ -1,0 +1,15 @@
+[package]
+name = "datacrush"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+filestore = { path = "crates/filestore" }
+tokio = { version = "1.35.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+sqlx = { version = "0.7.3", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+anyhow = "1.0.75"
+axum = "0.7.2"
+rand = "0.8.5"
