@@ -18,12 +18,13 @@ impl FileStore {
         }
     }
 
-    fn get_path(&self, path: &str) -> PathBuf {
-        Path::new(&self.base_path).join(path)
+    fn get_path(&self, path: &Path) -> Result<PathBuf, Error> {
+        println!("path: {:?}", path);
+        Ok(Path::new(&self.base_path).join(path))
     }
 
-    pub async fn create_file<T: Into<std::io::Error>>(&mut self, path: &str, stream: impl Stream<Item = Result<Bytes, T>>) -> Result<usize, Error> {
-        let path = self.get_path(path);
+    pub async fn create_file<T: Into<std::io::Error>>(&mut self, path: &Path, stream: impl Stream<Item = Result<Bytes, T>>) -> Result<usize, Error> {
+        let path = self.get_path(path)?;
         if let Some(dir) = Path::new(&path).parent() {
             create_dir_all(dir).await?;
         }
@@ -48,13 +49,13 @@ impl FileStore {
         Ok(byte_count)
     }
     
-    pub async fn delete_file(&mut self, path: &str) -> Result<(), Error> {
-        tokio::fs::remove_file(self.get_path(path)).await?;
+    pub async fn delete_file(&mut self, path: &Path) -> Result<(), Error> {
+        tokio::fs::remove_file(self.get_path(path)?).await?;
         Ok(())
     }
     
-    pub async fn get_file(&self, path: &str) -> Result<impl Stream<Item = Result<Bytes, Error>>, Error> {
-        let file = tokio::fs::File::open(self.get_path(path)).await?;
+    pub async fn get_file(&self, path: &Path) -> Result<impl Stream<Item = Result<Bytes, Error>>, Error> {
+        let file = tokio::fs::File::open(self.get_path(path)?).await?;
         Ok(ReaderStream::new(file))
     }
 }

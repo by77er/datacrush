@@ -1,6 +1,6 @@
 use axum::{
     extract::{Json, Path, State},
-    http::StatusCode,
+    http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{delete, get, post, put},
     Router,
@@ -11,7 +11,10 @@ use sqlx::{
     postgres::{PgPoolOptions, Postgres},
     Pool,
 };
-use std::io;
+use std::{
+    io,
+    path::{Path as StdPath, PathBuf},
+};
 
 mod file;
 mod paste;
@@ -66,19 +69,37 @@ async fn handle() -> &'static str {
     "Hello, World!"
 }
 
-async fn get_file(State(state): State<AppState>, Path(file): Path<String>) -> Response {
-    if let Ok(stream) = state.filestore.get_file(&file).await {
-        axum::body::Body::from_stream(stream).into_response()
+async fn get_file(State(state): State<AppState>, Path(file): Path<PathBuf>) -> Response {
+    let file = strip_parent(&file);
+    if let Ok(file_data) = file::get_file_data(&state.pool, &file).await {
+        if let Ok(stream) = state.filestore.get_file(&file).await {
+            let mut res = axum::body::Body::from_stream(stream).into_response();
+            res.headers_mut().insert(
+                "Content-Type",
+                HeaderValue::from_str(&file_data.content_type)
+                    .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+            );
+            res.headers_mut().insert(
+                "Content-Length",
+                HeaderValue::from_str(&file_data.size_bytes.to_string())
+                    .unwrap_or(HeaderValue::from_static("0")),
+            );
+            res
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving file").into_response()
+        }
     } else {
         (StatusCode::NOT_FOUND, "Not Found").into_response()
     }
 }
 
 async fn put_file(
+    headers: HeaderMap,
     State(mut state): State<AppState>,
-    Path(file): Path<String>,
+    Path(file): Path<PathBuf>,
     body: axum::body::Body,
 ) -> Response {
+    let file = strip_parent(&file);
     let stream = body.into_data_stream();
     if let Ok(size) = state
         .filestore
@@ -88,15 +109,39 @@ async fn put_file(
         )
         .await
     {
-        (StatusCode::CREATED, format!("Created ({} bytes)", size)).into_response()
+        let content_type = headers
+            .get("Content-Type")
+            .map(|v| v.to_str().unwrap_or("application/octet-stream"))
+            .unwrap_or("application/octet-stream");
+
+        match file::put_file_data(&state.pool, size as i64, content_type, &file).await {
+            Ok(_) => (
+                StatusCode::CREATED,
+                format!("Created ({} bytes)", size as i64),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create file metadata"),
+            )
+                .into_response(),
+        }
     } else {
         (StatusCode::INTERNAL_SERVER_ERROR, "Couldn't create file").into_response()
     }
 }
 
-async fn delete_file(State(mut state): State<AppState>, Path(file): Path<String>) -> Response {
+async fn delete_file(State(mut state): State<AppState>, Path(file): Path<PathBuf>) -> Response {
+    let file = strip_parent(&file);
     if let Ok(_) = state.filestore.delete_file(&file).await {
-        (StatusCode::OK, "OK").into_response()
+        match file::delete_file_data(&state.pool, &file).await {
+            Ok(_) => (StatusCode::OK, "OK").into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to delete file metadata"),
+            )
+                .into_response(),
+        }
     } else {
         (StatusCode::INTERNAL_SERVER_ERROR, "Couldn't delete file").into_response()
     }
@@ -143,6 +188,13 @@ async fn put_redirect(
         )
             .into_response()
     }
+}
+
+// stop directory traversal attacks
+fn strip_parent(path: &StdPath) -> PathBuf {
+    path.components()
+        .filter(|c| c != &std::path::Component::ParentDir)
+        .collect()
 }
 
 async fn not_found() -> impl IntoResponse {
