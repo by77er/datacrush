@@ -62,18 +62,12 @@ async fn handle() -> &'static str {
     "Hello, World!"
 }
 
-async fn get_file(State(_state): State<AppState>, Path(file): Path<String>) -> String {
-    // let (result,): (String,) = sqlx::query_as("SELECT $1")
-    //     .bind(file)
-    //     .fetch_one(&state.pool)
-    //     .await
-    //     .unwrap();
-
-    // format!("Got file \"{}\".", result)
-
-    // redirect::put_url(&state.pool, "https://google.com").await.unwrap();
-    // axum::body::Body::from_stream(/* something */);
-    format!("You requested \"{}\".", file)
+async fn get_file(State(state): State<AppState>, Path(file): Path<String>) -> Response {
+    if let Ok(stream) = state.filestore.get_file(&file).await {
+        axum::body::Body::from_stream(stream).into_response()
+    } else {
+        (StatusCode::NOT_FOUND, "Not Found").into_response()
+    }
 }
 
 async fn get_paste(State(state): State<AppState>, Path(slug): Path<String>) -> Response {

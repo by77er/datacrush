@@ -1,4 +1,4 @@
-use std::{io::Error, path::Path};
+use std::{io::Error, path::{Path, PathBuf}};
 
 use bytes::Bytes;
 
@@ -18,14 +18,15 @@ impl FileStore {
         }
     }
 
-    fn get_path(&self, path: &str) -> String {
-        format!("{}/{}", self.base_path, path)
+    fn get_path(&self, path: &str) -> PathBuf {
+        Path::new(&self.base_path).join(path)
     }
 
     pub async fn create_file(&mut self, path: &str, stream: impl Stream<Item = Result<Bytes, Error>>) -> Result<usize, Error> {
         let path = self.get_path(path);
-        let dir = Path::new(&path).parent().unwrap();
-        create_dir_all(dir).await?;
+        if let Some(dir) = Path::new(&path).parent() {
+            create_dir_all(dir).await?;
+        }
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
@@ -33,7 +34,6 @@ impl FileStore {
             .await?;
 
         let mut stream = Box::pin(StreamReader::new(stream));
-
         let mut chunk = [0; 64];
         let mut byte_count: usize = 0;
         loop {
@@ -69,7 +69,7 @@ mod tests {
     async fn test_create_file() {
         let mut filestore = FileStore::new("objects".to_string());
         let stream = futures_util::stream::once(async { Ok::<_, Error>(Bytes::from("Hello, World!")) });
-        let result = filestore.create_file("test.txt", stream).await;
+        let result = filestore.create_file("prefix/test.txt", stream).await;
         assert!(result.is_ok());
     }
 
@@ -77,9 +77,9 @@ mod tests {
     async fn test_get_file() {
         let mut filestore = FileStore::new("objects".to_string());
         let stream = futures_util::stream::once(async { Ok::<_, Error>(Bytes::from("Hello, World!")) });
-        let result = filestore.create_file("test.txt", stream).await;
+        let result = filestore.create_file("prefix/test.txt", stream).await;
         assert!(result.is_ok());
-        let stream = filestore.get_file("test.txt").await;
+        let stream = filestore.get_file("prefix/test.txt").await;
         assert!(stream.is_ok());
         let mut stream = StreamReader::new(stream.unwrap());
         let mut chunk = [0; 64];
@@ -92,11 +92,11 @@ mod tests {
     async fn test_delete_file() {
         let mut filestore = FileStore::new("objects".to_string());
         let stream = futures_util::stream::once(async { Ok::<_, Error>(Bytes::from("Hello, World!")) });
-        let result = filestore.create_file("test.txt", stream).await;
+        let result = filestore.create_file("prefix/test.txt", stream).await;
         assert!(result.is_ok());
-        let result = filestore.delete_file("test.txt").await;
+        let result = filestore.delete_file("prefix/test.txt").await;
         assert!(result.is_ok());
-        let stream = filestore.get_file("test.txt").await;
+        let stream = filestore.get_file("prefix/test.txt").await;
         assert!(stream.is_err());
     }
 }
