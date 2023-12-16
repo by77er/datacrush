@@ -198,8 +198,9 @@ async fn put_redirect(
 
 // stop directory traversal
 fn valid_path(path: &StdPath) -> bool {
+    println!("{:?}", path);
     path.is_relative()
-        && !path
+        && path
             .components()
             .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
