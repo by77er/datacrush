@@ -37,12 +37,12 @@ async fn main() {
         .route("/", get(handle))
         .route("/", post(handle))
         .route("/f/:file", get(get_file))
-        .route("/p/:paste", get(get_paste))
+        .route("/p/:slug", get(get_paste))
         .route("/r/:slug", get(get_redirect));
 
     let authenticated = Router::new()
         .route("/upload", post(handle))
-        .route("/paste", post(handle))
+        .route("/paste", post(put_paste))
         .route("/redirect", post(put_redirect));
 
     let app = Router::new()
@@ -72,14 +72,22 @@ async fn get_file(State(state): State<AppState>, Path(file): Path<String>) -> St
     "Hello, World!".to_string()
 }
 
-async fn get_paste(State(state): State<AppState>, Path(paste): Path<String>) -> String {
-    let (result,): (String,) = sqlx::query_as("SELECT $1")
-        .bind(paste)
-        .fetch_one(&state.pool)
-        .await
-        .unwrap();
+async fn get_paste(State(state): State<AppState>, Path(slug): Path<String>) -> Response {
+    if let Ok(paste) = paste::get_paste(&state.pool, &slug).await {
+        paste.into_response()
+    } else {
+        (StatusCode::NOT_FOUND, "Not Found").into_response()
+    }
+}
 
-    format!("Got file \"{}\".", result)
+async fn put_paste(State(state): State<AppState>, Json(payload): Json<paste::Request>) -> Response {
+    if let Ok(slug) = paste::put_paste(&state.pool, &payload.data).await {
+        axum::Json(paste::Response {
+            slug
+        }).into_response()
+    } else {
+        (StatusCode::INTERNAL_SERVER_ERROR, "Couldn't allocate a slug").into_response()
+    }
 }
 
 async fn get_redirect(State(state): State<AppState>, Path(slug): Path<String>) -> Response {
