@@ -46,10 +46,11 @@ impl FileStore {
             .await?;
 
         let mut stream = StreamReader::new(stream);
-        let mut chunk = [0; 64];
+        let mut chunk = [0; 1024 * 64];
         let mut byte_count: usize = 0;
         loop {
             let bytes = stream.read(&mut chunk).await?;
+            println!("Read {} bytes written", bytes);
             if bytes == 0 {
                 break;
             }

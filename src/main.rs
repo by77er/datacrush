@@ -1,72 +1,78 @@
 use axum::{
+    error_handling::HandleErrorLayer,
     extract::{Json, Path, State},
     http::{HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
     routing::{delete, get, post, put},
     Router,
 };
-use filestore::FileStore;
 use futures::TryStreamExt;
-use sqlx::{
-    postgres::{PgPoolOptions, Postgres},
-    Pool,
-};
 use std::{
     io,
     path::{Path as StdPath, PathBuf},
 };
+use tower::{BoxError, ServiceBuilder};
+use tower_http::{limit::RequestBodyLimitLayer, normalize_path::NormalizePathLayer};
+use tower_sessions::{
+    cookie::time::Duration, Expiry, Session, SessionManagerLayer,
+};
 
-mod file;
-mod paste;
-mod redirect;
-
-#[derive(Clone)]
-struct AppState {
-    pub pool: Pool<Postgres>,
-    pub filestore: FileStore,
-}
+mod func;
+use func::{file, paste, redirect};
+mod config;
+use config::{get_session_store, get_appstate, AppState};
 
 #[tokio::main]
 async fn main() {
-    let state = AppState {
-        pool: PgPoolOptions::new()
-            .max_connections(5)
-            .connect("postgres://postgres:postgres@localhost/datacrush")
-            .await
-            .unwrap(),
-        filestore: FileStore::new("objects".to_string()),
-    };
+    let state = get_appstate().await.unwrap();
+    let session_store = get_session_store(&state.pool).await.unwrap();
 
-    sqlx::migrate!("./migrations")
-        .run(&state.pool)
-        .await
-        .unwrap();
+    let session_service = ServiceBuilder::new()
+        .layer(HandleErrorLayer::new(|_: BoxError| async {
+            StatusCode::BAD_REQUEST
+        }))
+        .layer(
+            SessionManagerLayer::new(session_store)
+                .with_name("datacrush.session")
+                .with_domain("localhost".to_string())
+                .with_secure(false)
+                .with_expiry(Expiry::OnInactivity(Duration::days(1))),
+        );
 
     let unauthenticated = Router::new()
         .route("/", get(handle))
         .route("/", post(handle))
         .route("/f/*file", get(get_file))
         .route("/p/:slug", get(get_paste))
-        .route("/r/:slug", get(get_redirect));
+        .route("/r/:slug", get(get_redirect))
+        .layer(RequestBodyLimitLayer::new(1024 * 1024 * 2));
 
     let authenticated = Router::new()
         .route("/f/*file", put(put_file))
         .route("/f/*file", delete(delete_file))
         .route("/p", post(put_paste))
-        .route("/r", post(put_redirect));
+        .route("/r", post(put_redirect))
+        .layer(RequestBodyLimitLayer::new(1024 * 1024 * 1024 * 10));
 
     let app = Router::new()
         .nest("/", unauthenticated)
         .nest("/", authenticated)
         .fallback(get(not_found))
-        .with_state(state);
+        .with_state(state)
+        .layer(NormalizePathLayer::trim_trailing_slash())
+        .layer(session_service);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn handle() -> &'static str {
-    "Hello, World!"
+async fn handle(session: Session) -> String {
+    let ctr = session
+        .get::<u32>("ctr")
+        .unwrap_or(Some(0u32))
+        .unwrap_or_default();
+    session.insert("ctr", ctr + 1).unwrap();
+    format!("Hello, World! {}", ctr)
 }
 
 async fn get_file(State(state): State<AppState>, Path(file): Path<PathBuf>) -> Response {
@@ -76,16 +82,12 @@ async fn get_file(State(state): State<AppState>, Path(file): Path<PathBuf>) -> R
     if let Ok(file_data) = file::get_file_data(&state.pool, &file).await {
         if let Ok(stream) = state.filestore.get_file(&file).await {
             let mut res = axum::body::Body::from_stream(stream).into_response();
-            res.headers_mut().insert(
-                "Content-Type",
-                HeaderValue::from_str(&file_data.content_type)
-                    .unwrap_or(HeaderValue::from_static("application/octet-stream")),
-            );
-            res.headers_mut().insert(
-                "Content-Length",
-                HeaderValue::from_str(&file_data.size_bytes.to_string())
-                    .unwrap_or(HeaderValue::from_static("0")),
-            );
+            let content_type = HeaderValue::from_str(&file_data.content_type)
+                .unwrap_or(HeaderValue::from_static("application/octet-stream"));
+            res.headers_mut().insert("Content-Type", content_type);
+            if let Ok(size) = HeaderValue::from_str(&file_data.size_bytes.to_string()) {
+                res.headers_mut().insert("Content-Length", size);
+            }
             res
         } else {
             (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving file").into_response()
@@ -174,26 +176,26 @@ async fn put_paste(State(state): State<AppState>, Json(payload): Json<paste::Req
 }
 
 async fn get_redirect(State(state): State<AppState>, Path(slug): Path<String>) -> Response {
-    if let Ok(url) = redirect::get_url(&state.pool, &slug).await {
-        Redirect::to(&url).into_response()
-    } else {
-        (StatusCode::NOT_FOUND, "Not Found").into_response()
-    }
+    redirect::get_url(&state.pool, &slug)
+        .await
+        .map(|url| Redirect::to(&url).into_response())
+        .unwrap_or((StatusCode::NOT_FOUND, "Not Found").into_response())
 }
 
 async fn put_redirect(
     State(state): State<AppState>,
     Json(payload): Json<redirect::Request>,
 ) -> Response {
-    if let Ok(slug) = redirect::put_url(&state.pool, &payload.url).await {
-        axum::Json(redirect::Response { slug }).into_response()
-    } else {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Couldn't allocate a slug",
+    redirect::put_url(&state.pool, &payload.url)
+        .await
+        .map(|slug| axum::Json(redirect::Response { slug }).into_response())
+        .unwrap_or(
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Couldn't allocate a slug",
+            )
+                .into_response(),
         )
-            .into_response()
-    }
 }
 
 // stop directory traversal
